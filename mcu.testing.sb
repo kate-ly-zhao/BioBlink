@@ -1,0 +1,126 @@
+// Copyright (c) 2020, Laird Connectivity
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+// IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//
+// SPDX-License-Identifier:ISC
+//
+// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// +++++                                                                      ++
+// +++++  When UwTerminal downloads the app it will store it as a filenname   ++
+// +++++  which consists of all characters up to the first . and excluding it ++
+// +++++                                                                      ++
+// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//
+// MCU Logic for BioBlink
+//
+//******************************************************************************
+
+//******************************************************************************
+// Definitions
+//
+// The sketchy thing I'm doing rn is setting buttons as inputs and LEDs as outputs
+// Mostly to test state logic 
+//******************************************************************************
+#define VCC_FILT				//21
+#define VBUS				//25
+
+#define HAPTIC_PWM			//13	// IO, PWM; out 
+#define BUCK_ON			13	//17	// IO; out - LED 1
+#define CURR_SET_PWM			//19	// IO, PWM; out 
+#define TX_EN			14	//23	// IO; out - LED 2
+#define MOD				//27	// IO, FREQ; out 
+#define RX_EN			15	//28	// IO; out - LED 3
+#define BLINK			11	//29	// IO, interrupt; in - Button 1
+#define ENV_ADC				//10	// ADC; in
+#define BAT_ADC				//12	// ADC; in
+#define PBSTAT				//36	// IO; in
+#define CHRG				//38	// IO; in
+#define BLK_THRES_PWM			//39	// IO, PWM; out
+
+#define SWDIO				//52
+#define SWDCLK				//31
+#define UART_TX			35	//42
+#define UART_RX			29	//14
+#define UART_RTS			39	//44
+#define UART_CTS			37	//15
+#define RESET				//6	// Check if RESET is some default name
+#define AUTORUN				//34
+#define D_NEGATIVE			//49
+#define D_POSITIVE			//26
+#define I2C_SDA			26	//45
+#define I2C_SCL			27	//40
+
+//******************************************************************************
+// Include other files
+//******************************************************************************
+// Ignore for now; will likely need to add BLE advertising libraries in here later
+
+//******************************************************************************
+// Global Variable Declarations
+//******************************************************************************
+
+dim rc      // Result code 
+dim mv
+
+//******************************************************************************
+// Function and Subroutine definitions
+//******************************************************************************
+
+//==============================================================================
+// I have no idea what this does but it breaks if it's not here soooo 
+//==============================================================================
+sub AssertRC(byval rc as integer,byval tag as integer)
+  if (rc!=0) then
+    print "Failed with ";integer.h' rc;" at tag ";tag;"\n"
+  endif
+endsub
+
+//******************************************************************************
+// Handler definitions
+//******************************************************************************
+function blinkdetected()
+    dim i : i = GpioRead(BLINK)	// Reading input value from BLINK=button 1
+
+    //Button 1 being pressed is being used as a blink
+    if i==0 then
+        GpioWrite(HAPTIC_PWM,1)		// Turns LED 1 on when a blink is detected
+        print "\n Blink happened aka button 1 pressed"
+    elseif i==1 then
+        GpioWrite(HAPTIC_PWM,0)		// Turns LED 1 off
+        print "\n Button 1 released"
+    endif
+endfunc 1
+
+//******************************************************************************
+// Equivalent to main() in C
+//******************************************************************************
+print "Hello world\n\n"
+
+// Reading power supply (How is power read irl?)
+mv = ReadPwrSupplyMv()
+print "\nSupply voltage is: ";mv;"mV\n"
+
+rc = gpiosetfunc(BLINK,1,2)	// Sets Button 1 SIO as a digital in w/ a weak pull-up resistor
+AssertRC(rc, 122)
+rc = gpiosetfunc(HAPTIC_PWM,2,0)	// Sets LED 1 SIO as a digital out
+AssertRC(rc,130)
+rc = gpiosetfunc(0,BLINK,2)	// Binds a gpis transition high or low to an event for button 1 (aka blink)
+AssertRC(rc, 138)
+
+onevent evgpiochan0 call blinkdetected        //Detects when button 1 is pressed or released and calls the function
+
+//------------------------------------------------------------------------------
+// Wait for a synchronous event.
+// An application can have multiple <WaitEvent> statements
+//------------------------------------------------------------------------------
+waitevent
