@@ -70,8 +70,11 @@
 #define LT_BASE_UUID                         		"\56\9a\00\00\b8\7f\49\0c\92\cb\11\ba\5e\a5\16\7c\"
 #define UUID_BATTERY_SERVICE                        0x180F
 #define UUID_BAT_LEVEL_CHAR							0x2A19
-#define UUID_HAPTIC_FEEDBACKS						0x2030
+#define UUID_HAPTIC_FEEDBACK_COUNT					0x2030
 #define UUID_CURRENT_STATE							0x2031
+#define UUID_ENV_ADC								0x2032
+#define UUID_BLINK_SLOPE_P							0x2033
+#define UUID_BLINK_SLOPE_N							0x2034 
 
 //BLE EVENT MSG IDs
 #define BLE_EVBLEMSGID_CONNECT                      0   //msgCtx = connection handle
@@ -141,8 +144,10 @@ dim bseUuid$ : bseUuid$=LT_BASE_UUID
 dim hBseUuid : hBseUuid=BleHandleUuid128(bseUuid$)
 dim hSvc  //service handler
 dim hSerBat //gatt service 
-dim hcharADC ///gatt server adc characteristic handle
-dim hcharCurrentState ///gatt server adc characteristic handle
+dim hcharBatADC ///gatt server battery adc characteristic handle
+dim hcharEnvADC ///gatt server envelope adc characteristic handle
+dim hcharCurrentState ///gatt server Current State characteristic handle
+dim hcharHFeedbackCount
 dim nTxBufs //number of free tx buffers for notification
 dim nCtx
 
@@ -337,7 +342,7 @@ Sub Create_Char_Bat()
 	rc=BleCharNew(0x22, BleHandleUuidSibling(hBseUuid,(UUID_BAT_LEVEL_CHAR)), BleAttrMetaData(1,0,2,1,rc2), BleAttrMetaData(1,1,1,1,rc3),0)
     rc = BleCharDescPrstnFrmt(format,exponent,unit,namespace,namespacedesc)
 	AssertRC(rc,155) : AssertRC(rc2,1552)
-    rc=BleCharCommit(hSvc,dta$,hcharADC)
+    rc=BleCharCommit(hSvc,dta$,hcharBatADC)
     AssertRC(rc,0604)
 endsub
 
@@ -353,6 +358,44 @@ Sub Create_Char_Current_State()
 	dim namespacedesc : namespacedesc = 0x0000
     //Initialise GATT Server batt read / notify LEDs Characteristic - Read/Write
 	chprop = BLE_CHAR_PROPERTIES_READ | BLE_CHAR_PROPERTIES_NOTIFY //replace 0x22
+	rc=BleCharNew(chprop, BleHandleUuidSibling(hBseUuid,(UUID_CURRENT_STATE)), BleAttrMetaData(1,0,2,1,rc2), BleAttrMetaData(1,1,1,1,rc3),0)
+    rc = BleCharDescPrstnFrmt(format,exponent,unit,namespace,namespacedesc)
+	AssertRC(rc,155) : AssertRC(rc2,1552)
+    rc=BleCharCommit(hSvc,dta$,hcharCurrentState)
+    AssertRC(rc,0604)
+endsub
+
+Sub Create_Char_Slope_P()
+    dim dta$ : dta$="\00"
+    dim rc2,rc3
+	dim chprop
+	
+	dim format : format = 0x04            //uint8 - Unsigned 8-bit integer
+	dim exponent : exponent = 0
+	dim unit : unit = 0x2700              //unitless
+	dim namespace : namespace = 0x01      //Bluetooth SIG
+	dim namespacedesc : namespacedesc = 0x0000
+    //Initialise GATT Server batt read / notify LEDs Characteristic - Read/Write
+	chprop = BLE_CHAR_PROPERTIES_READ | BLE_CHAR_PROPERTIES_NOTIFY //replace 0x22
+	rc=BleCharNew(chprop, BleHandleUuidSibling(hBseUuid,(UUID_CURRENT_STATE)), BleAttrMetaData(1,0,2,1,rc2), BleAttrMetaData(1,1,1,1,rc3),0)
+    rc = BleCharDescPrstnFrmt(format,exponent,unit,namespace,namespacedesc)
+	AssertRC(rc,155) : AssertRC(rc2,1552)
+    rc=BleCharCommit(hSvc,dta$,hcharCurrentState)
+    AssertRC(rc,0604)
+endsub
+
+Sub Create_Char_ENV_ADC()
+    dim dta$ : dta$="\00"
+    dim rc2,rc3
+	dim chprop
+	
+	dim format : format = 0x04            //uint8 - Unsigned 8-bit integer
+	dim exponent : exponent = 0
+	dim unit : unit = 0x2700              //unitless
+	dim namespace : namespace = 0x01      //Bluetooth SIG
+	dim namespacedesc : namespacedesc = 0x0000
+    //Initialise GATT Server batt read / notify LEDs Characteristic - Read/Write
+	chprop = BLE_CHAR_PROPERTIES_READ | BLE_CHAR_PROPERTIES_INDICATE //replace 0x22
 	rc=BleCharNew(chprop, BleHandleUuidSibling(hBseUuid,(UUID_CURRENT_STATE)), BleAttrMetaData(1,0,2,1,rc2), BleAttrMetaData(1,1,1,1,rc3),0)
     rc = BleCharDescPrstnFrmt(format,exponent,unit,namespace,namespacedesc)
 	AssertRC(rc,155) : AssertRC(rc2,1552)
@@ -388,8 +431,8 @@ sub MAKE_ADVERT_RPTS()
 	AssertRC(rc,179)
 	rc = BleAdvRptAddUuid128(adRpt$,hSerBat)
 	rc = BleAdvRptsCommit(adRpt$,scnRpt$)
-	print "\n ADVRPT: ";adRpt$; "\n"
-	print "\n SCRPT: "; scnRpt$; "\n"
+	//print "\n ADVRPT: ";adRpt$; "\n"
+	//print "\n SCRPT: "; scnRpt$; "\n"
 	print "\n advert reports commited \n"
 	
 endsub
@@ -409,7 +452,8 @@ Sub OUTPUT_STATE(BYVAL STATE AS INTEGER)
 	CURRENT_STATE = STATE
 	dim value$ as string
 	rc = BleEncode8(value$,CURRENT_STATE,0)
-	rc = BleCharValueIndicate(hcharCurrentState,value$)
+	rc = BLECHARVALUENOTIFY(hcharCurrentState,value$)
+	print "\n CURRENT STATE BLE VALUE: ";value$;"\n" 
 endsub
 
 
@@ -730,9 +774,9 @@ function hndlrchar()
 	dim value$ as string
 	dim value
 	rc = BleEncode16(value$,adc,0)
-//rc = BleCharCommit(hSvc,value$,hcharADC)
+//rc = BleCharCommit(hSvc,value$,hcharBatADC)
 	if nTxBufs > 0 then
-		rc = BleCharValueIndicate(hcharADC,value$)
+		rc = BleCharValueIndicate(hcharBatADC,value$)
 		print "\n ADC value"; adc;"\n"
 		print "\n value encoded:"; value$; "\n"
 		rc = BleDecodeS16(value$,value,0)
@@ -740,11 +784,11 @@ function hndlrchar()
 		print "\nFree space in ad report: "; BleAdvRptGetSpace(adRpt$); " bytes"
 		print "\nFree space in scan report: "; BleAdvRptGetSpace(scnRpt$); " bytes \n"
 		nTxBufs = nTxBufs-1
-endif
+	endif
 endfunc 1
 
 Function HndlrCccd(charHndl, val)  
-    if charHndl == hcharADC then
+    if charHndl == hcharBatADC then
         print "\n CCCD:";val
         if val==2 then
            // rc=GpioBindEvent(0,GPIO_BTN0,2)         //Binds a gpio transition high or low on button 0 (SIO16) to event 0
@@ -795,6 +839,9 @@ OnEvent EvCharHvc    		call HndlrCharHvc
 OnEvent EvBleMsg     		call HndlrBleMsg   
 OnEvent EvCharCccd  		call HndlrCccd
 onevent EVTMR3 				call hndlrchar
+
+
+
 
 
 TURN_ON_ROUTINE()
